@@ -5,10 +5,11 @@ import { commandScore } from './command-score'
 type Children = { children?: React.ReactNode }
 type DivProps = React.HTMLAttributes<HTMLDivElement>
 
-type LoadingProps = Children & DivProps & {
-  /** Estimated progress of loading asynchronous options. */
-  progress?: number
-}
+type LoadingProps = Children &
+  DivProps & {
+    /** Estimated progress of loading asynchronous options. */
+    progress?: number
+  }
 type EmptyProps = Children & DivProps & {}
 type SeparatorProps = DivProps & {
   /** Whether this separator should always be rendered. Useful if you disable automatic filtering. */
@@ -139,8 +140,8 @@ const useStore = () => React.useContext(StoreContext)
 // @ts-ignore
 const GroupContext = React.createContext<Group>(undefined)
 
-let idCounter = 0;
-const useId = () => 'cmdk'+(idCounter++).toString(32);
+let idCounter = 0
+const useId = () => 'cmdk' + (idCounter++).toString(32)
 
 const Command = React.forwardRef<HTMLDivElement, CommandProps>((props, forwardedRef) => {
   const ref = React.useRef<HTMLDivElement>(null)
@@ -943,11 +944,58 @@ function mergeRefs<T = any>(refs: Array<React.MutableRefObject<T> | React.Legacy
   }
 }
 
+function is(x: any, y: any) {
+  return (
+    (x === y && (x !== 0 || 1 / x === 1 / y)) || (x !== x && y !== y) // eslint-disable-line no-self-compare
+  )
+}
+function checkIfSnapshotChanged<T>(inst: { value: T; getSnapshot: () => T }): boolean {
+  const latestGetSnapshot = inst.getSnapshot
+  const prevValue = inst.value
+  try {
+    const nextValue = latestGetSnapshot()
+    return !is(prevValue, nextValue)
+  } catch (error) {
+    return true
+  }
+}
+function useSyncExternalStore<T>(
+  subscribe: (arg0: () => void) => void,
+  getSnapshot: () => T,
+  getServerSnapshot?: () => T,
+): T {
+  const value = getSnapshot()
+  const [{ inst }, forceUpdate] = React.useState({ inst: { value, getSnapshot } })
+
+  useLayoutEffect(() => {
+    inst.value = value
+    inst.getSnapshot = getSnapshot
+    if (checkIfSnapshotChanged(inst)) {
+      // Force a re-render.
+      forceUpdate({ inst })
+    }
+  }, [subscribe, value, getSnapshot])
+
+  React.useEffect(() => {
+    if (checkIfSnapshotChanged(inst)) {
+      forceUpdate({ inst })
+    }
+    const handleStoreChange = () => {
+      if (checkIfSnapshotChanged(inst)) {
+        forceUpdate({ inst })
+      }
+    }
+    return subscribe(handleStoreChange)
+  }, [subscribe])
+
+  return value
+}
+
 /** Run a selector against the store state. */
 function useCmdk<T = any>(selector: (state: State) => T) {
   const store = useStore()
   const cb = () => selector(store.snapshot())
-  return React.useSyncExternalStore(store.subscribe, cb, cb)
+  return useSyncExternalStore(store.subscribe, cb, cb)
 }
 
 function useValue(
